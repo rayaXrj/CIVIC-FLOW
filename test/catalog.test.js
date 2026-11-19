@@ -57,13 +57,13 @@ test('public landing metrics come from live complaint status counts',()=>{
   assert.ok(server.includes("app.get('/api/public/stats'"));
   for(const key of ['total','solved','pending'])assert.ok(app.includes(`data-impact=\"${key}\"`),`missing public metric ${key}`);
 });
-test('complaint location picker supports OpenStreetMap, draggable pins, and GPS without a map API key',()=>{
+test('complaint form retains GPS and manual coordinates without an embedded tile map',()=>{
   const root=path.join(__dirname,'..'),app=fs.readFileSync(path.join(root,'public','app.js'),'utf8'),html=fs.readFileSync(path.join(root,'public','index.html'),'utf8'),css=fs.readFileSync(path.join(root,'public','styles.css'),'utf8'),server=fs.readFileSync(path.join(root,'server.js'),'utf8');
-  for(const token of ['tile.openstreetmap.org','draggable:true','navigator.geolocation.getCurrentPosition',"initializeMapPicker('complaint')"])assert.ok(app.includes(token),`missing map behavior ${token}`);
-  assert.ok(html.includes('leaflet@1.9.4'));
-  assert.ok(css.includes('.location-map{height:340px'));
+  for(const token of ['${prefix}-lat','${prefix}-lng','navigator.geolocation.getCurrentPosition','setCoordinates(p,pos.coords.latitude,pos.coords.longitude)'])assert.ok(app.includes(token),`missing location behavior ${token}`);
+  assert.ok(css.includes('.map-row input'));
+  assert.doesNotMatch(html,/leaflet@/i);
   assert.ok(!server.includes('/api/map-config'));
-  assert.doesNotMatch(app,/api\.maptiler\.com|satellite/i);
+  assert.doesNotMatch(app,/tile\.openstreetmap\.org|initializeMapPicker|tileLayer/i);
 });
 test('sign-in page does not expose demo credential fill shortcuts',()=>{
   const app=fs.readFileSync(path.join(__dirname,'..','public','app.js'),'utf8');

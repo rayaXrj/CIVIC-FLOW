@@ -101,22 +101,8 @@ button.geo-row-clickable:hover{transform:translateX(4px) scale(1.006);border-col
 @media(max-width:740px){.impact-metrics{gap:8px;margin-top:20px}.impact-metrics span{font-size:9px}.geo-content{max-height:310px}.geo-row{padding:8px}.geo-row-foot{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.geo-content,.geo-row,.geo-track i,.district-panel:before{animation:none!important;filter:none!important;transform:none!important}}
 
-/* Complaint location map */
-.location-map-card{overflow:hidden;border:1px solid #dfe8e5;border-radius:15px;background:#fff;box-shadow:0 10px 28px #173b3710}
-.location-map-toolbar{min-height:66px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(115deg,#f6faf8,#f1f6ff);border-bottom:1px solid #e7eeeb}
-.location-map-toolbar strong,.location-map-toolbar small{display:block}
-.location-map-toolbar strong{font:800 11px Manrope;color:#203a45}
-.location-map-toolbar small{font-size:9px;color:#7e9098;margin-top:4px}
-.location-map{height:340px;width:100%;background:linear-gradient(140deg,#e7eff1,#dbe8e8)}
-.map-selection-status{min-height:35px;padding:10px 13px;color:#5f777a;background:#fbfdfc;font-size:10px;line-height:1.45}
+/* Optional coordinates and device location */
 .map-row{margin-top:8px}
 .map-row input{min-width:0;width:0;flex:1;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:9px 10px;color:var(--ink);font-size:10px}
 .map-row input:focus{outline:2px solid #2867e829;border-color:#8eb3fa}
-.civic-map-pin{background:transparent;border:0}
-.civic-map-pin span{display:block;position:relative;width:25px;height:25px;margin:2px;border:3px solid white;border-radius:50% 50% 50% 0;background:#e64c5a;box-shadow:0 3px 12px #10224170;transform:rotate(-45deg);animation:mapPinDrop .35s cubic-bezier(.2,.8,.2,1)}
-.civic-map-pin span:after{content:'';position:absolute;inset:5px;border-radius:50%;background:white}
-.leaflet-container{font:11px 'DM Sans',sans-serif}
-.leaflet-control-attribution{font-size:8px!important}
-@keyframes mapPinDrop{0%{opacity:0;transform:rotate(-45deg) translate(0,-12px) scale(.7)}100%{opacity:1;transform:rotate(-45deg) translate(0,0) scale(1)}}
-@media(max-width:600px){.location-map{height:270px}.location-map-toolbar{align-items:flex-start;flex-direction:column}.map-row{flex-wrap:wrap}.map-row input{flex:1 1 38%}.map-row .btn{flex:1 1 100%}}
-@media(prefers-reduced-motion:reduce){.civic-map-pin span{animation:none!important}}
+@media(max-width:600px){.map-row{flex-wrap:wrap}.map-row input{flex:1 1 38%}.map-row .btn{flex:1 1 100%}}

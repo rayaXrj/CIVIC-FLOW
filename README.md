@@ -112,7 +112,7 @@ To enable deployment, create a `staging` GitHub Environment and set repository v
 
 The bundled administrative directory is derived from India’s Local Government Directory (LGD) through the open `kalyangupta12/indian-cities-data` project. Its included metadata snapshot is **23 September 2026** and contains 36 States/Union Territories, 784 districts, 7,092 sub-districts, and 5,050 urban local bodies. The source catalog is bundled for local use and has its own license and attribution under `public/data/README.md`. These administrative records do not contain every informal settlement or postal locality; the city/town fields allow a user to type a settlement name where an urban local body is not listed. Refresh the source snapshot before using it as an authoritative live directory.
 
-Complaint coordinates are optional. The complaint form has an interactive OpenStreetMap map with draggable pins, device GPS, and manual coordinates. Citizens can tap or click the map to place a pin and drag it to refine the reported location. No map API key is needed; map tiles load from OpenStreetMap and attribution appears in the map controls.
+Complaint coordinates are optional. The complaint form supports device GPS capture and manual latitude/longitude entry; the state, district, taluka, city, and address fields remain available when GPS is denied. No external map tile service or map API key is required.
 
 ## Important before public deployment
 
