@@ -59,6 +59,7 @@ app.get('/api/health', async (_req, res) => {
   catch { res.status(503).json({ status: 'database-unavailable' }); }
 });
 app.get('/api/meta', (_req, res) => res.json({ categories, locationData: 'bundled', roles: ['citizen', 'admin', 'contractor'] }));
+app.get('/api/map-config',(_req,res)=>res.json({satelliteEnabled:Boolean(process.env.MAPTILER_API_KEY),mapTilerKey:process.env.MAPTILER_API_KEY||''}));
 
 app.get('/api/public/stats', async (_req,res)=>{
   try{

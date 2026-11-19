@@ -57,3 +57,14 @@ test('public landing metrics come from live complaint status counts',()=>{
   assert.ok(server.includes("app.get('/api/public/stats'"));
   for(const key of ['total','solved','pending'])assert.ok(app.includes(`data-impact=\"${key}\"`),`missing public metric ${key}`);
 });
+test('complaint location picker supports satellite, street, pin, GPS, and map centering',()=>{
+  const root=path.join(__dirname,'..'),app=fs.readFileSync(path.join(root,'public','app.js'),'utf8'),html=fs.readFileSync(path.join(root,'public','index.html'),'utf8'),css=fs.readFileSync(path.join(root,'public','styles.css'),'utf8'),server=fs.readFileSync(path.join(root,'server.js'),'utf8');
+  for(const token of ['maps/satellite-v4/','tile.openstreetmap.org','draggable:true','navigator.geolocation.getCurrentPosition','function centerMapToArea',"initializeMapPicker('complaint')"])assert.ok(app.includes(token),`missing map behavior ${token}`);
+  assert.ok(html.includes('leaflet@1.9.4'));
+  assert.ok(css.includes('.location-map{height:340px'));
+  assert.ok(server.includes("app.get('/api/map-config'"));
+});
+test('sign-in page does not expose demo credential fill shortcuts',()=>{
+  const app=fs.readFileSync(path.join(__dirname,'..','public','app.js'),'utf8');
+  assert.doesNotMatch(app,/data-demo|Demo access|Fill login/);
+});

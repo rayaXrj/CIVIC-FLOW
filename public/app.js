@@ -1,7 +1,7 @@
 /* CivicFlow client — role aware, responsive, live-updating single page app. */
 const $ = (s,root=document)=>root.querySelector(s), $$=(s,root=document)=>[...root.querySelectorAll(s)];
 const app=$('#app'), modalRoot=$('#modal-root'), toastRoot=$('#toast-region');
-const state={token:localStorage.getItem('civicflow-token'),user:JSON.parse(localStorage.getItem('civicflow-user')||'null'),page:'overview',data:null,loc:{},catalogs:{},socket:null,search:'',statusFilter:'all',priorityFilter:'all',locationFilter:{state:'',district:'',subdistrict:''},geoView:{level:'states',selectedState:''}};
+const state={token:localStorage.getItem('civicflow-token'),user:JSON.parse(localStorage.getItem('civicflow-user')||'null'),page:'overview',data:null,loc:{},catalogs:{},socket:null,search:'',statusFilter:'all',priorityFilter:'all',locationFilter:{state:'',district:'',subdistrict:''},geoView:{level:'states',selectedState:''},mapPickers:{},mapConfig:null};
 const icon={overview:'▦',complaints:'▤',contractors:'♙',announcements:'◉',account:'◎'};
 const pretty=s=>String(s||'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -40,7 +40,7 @@ function locationFields(prefix,{city=true,address=true,map=true,required=true}={
     ${selectField('Taluka / Tehsil / Sub-district',`${prefix}-subdistrict`,[],'Select district first',required)}
     ${city?`<div class="field"><label for="${prefix}-city">City / Town / Local body${required?' *':''}</label><input id="${prefix}-city" name="${prefix}-city" list="${prefix}-city-list" placeholder="Type or choose a city / town" ${required?'required':''}><datalist id="${prefix}-city-list"></datalist><div class="hint">Search official urban local bodies or enter a settlement name.</div></div>`:''}
     ${address?`<div class="field span-two"><label for="${prefix}-address">Street / landmark / detailed address${required?' *':''}</label><input id="${prefix}-address" name="${prefix}-address" placeholder="Building, street, landmark, PIN code" ${required?'required':''}></div>`:''}
-    ${map?`<div class="field span-two"><label>Precise location <span class="hint">(optional, helps route the crew)</span></label><div class="map-row"><input type="number" step="any" name="${prefix}-lat" placeholder="Latitude" aria-label="Latitude"><input type="number" step="any" name="${prefix}-lng" placeholder="Longitude" aria-label="Longitude"><button class="btn btn-quiet btn-sm" type="button" data-geolocate="${prefix}">⌖ Use my location</button></div><div class="map-note" id="${prefix}-geo-note">Device location stays optional. A street address is still required.</div></div>`:''}
+    ${map?`<div class="field span-two"><label>Pin the exact issue location <span class="hint">(click or drag the marker)</span></label><div class="location-map-card"><div class="location-map-toolbar"><span><strong>Choose a map view</strong><small>Satellite imagery helps pinpoint the spot</small></span><div class="map-layer-switch"><button type="button" class="active" data-map-layer="satellite" data-map-prefix="${prefix}">Satellite</button><button type="button" data-map-layer="street" data-map-prefix="${prefix}">Street</button></div></div><div id="${prefix}-map" class="location-map" role="application" aria-label="Map for selecting the complaint location"></div><div class="map-selection-status" id="${prefix}-map-status" aria-live="polite">Select an area above, use your location, or tap the map to place a pin.</div></div><div class="map-row"><input type="number" step="any" name="${prefix}-lat" placeholder="Latitude" aria-label="Latitude"><input type="number" step="any" name="${prefix}-lng" placeholder="Longitude" aria-label="Longitude"><button class="btn btn-quiet btn-sm" type="button" data-geolocate="${prefix}">⌖ Use my location</button></div><div class="map-note" id="${prefix}-geo-note">GPS access requires permission. You can place the pin manually.</div></div>`:''}
   </div>`;
 }
 function wireLocation(root=document){
@@ -48,21 +48,104 @@ function wireLocation(root=document){
     const prefix=el.id.slice(0,-6),stateName=el.value,stateItem=locationMeta.states.find(x=>x.name===stateName);
     const districtSel=$(`#${prefix}-district`,root),subSel=$(`#${prefix}-subdistrict`,root),city=$(`#${prefix}-city`,root);
     fillSelect(districtSel,locationMeta.districts.filter(d=>d.stateCode===stateItem?.code).map(d=>d.name),'Select district');fillSelect(subSel,[],'Select district first');
-    if(city) fillCityList(prefix,stateItem?.code,null);
+    if(city){city.value='';fillCityList(prefix,stateItem?.code,null);}
+    clearMapPin(prefix);centerMapToArea(prefix);
   });});
   $$('select[id$="-district"]',root).forEach(el=>{if(el.dataset.wired)return;el.dataset.wired='1';el.addEventListener('change',()=>{
-    const prefix=el.id.slice(0,-9),districtName=el.value,d=locationMeta.districts.find(x=>x.name===districtName && x.stateCode===$(`#${prefix}-state`,root)?.selectedOptions[0]?.dataset?.statecode);
+    const prefix=el.id.slice(0,-9),districtName=el.value;
     const stateName=$(`#${prefix}-state`,root)?.value,st=locationMeta.states.find(x=>x.name===stateName),district=locationMeta.districts.find(x=>x.name===districtName&&x.stateCode===st?.code);
     fillSelect($(`#${prefix}-subdistrict`,root),locationMeta.subdistricts.filter(x=>x.districtCode===district?.code).map(x=>x.name),'Select taluka / tehsil');
-    fillCityList(prefix,st?.code,district?.code);
+    fillCityList(prefix,st?.code,district?.code);const city=$(`#${prefix}-city`,root);if(city)city.value='';
+    clearMapPin(prefix);centerMapToArea(prefix);
+  });});
+  $$('input[id$="-city"]',root).forEach(el=>{if(el.dataset.mapWired)return;el.dataset.mapWired='1';el.addEventListener('blur',()=>centerMapToArea(el.id.slice(0,-5)));});
+  $$('input[name$="-lat"],input[name$="-lng"]',root).forEach(el=>{if(el.dataset.mapWired)return;el.dataset.mapWired='1';el.addEventListener('change',()=>{
+    const prefix=el.name.slice(0,-4),latText=$(`[name="${prefix}-lat"]`,root)?.value?.trim(),lngText=$(`[name="${prefix}-lng"]`,root)?.value?.trim();
+    if(latText&&lngText){const lat=Number(latText),lng=Number(lngText);if(Number.isFinite(lat)&&Number.isFinite(lng))setMapPin(prefix,lat,lng,{zoom:16,status:'Coordinates entered manually.'});}
+    else if(state.mapPickers[prefix]?.marker){state.mapPickers[prefix].map.removeLayer(state.mapPickers[prefix].marker);state.mapPickers[prefix].marker=null;mapStatus(prefix,'Enter both coordinates or choose the point directly on the map.');}
   });});
   $$('[data-geolocate]',root).forEach(btn=>{if(btn.dataset.wired)return;btn.dataset.wired='1';btn.addEventListener('click',()=>{
     const p=btn.dataset.geolocate,note=$(`#${p}-geo-note`,root);if(!navigator.geolocation){note.textContent='This browser does not provide location access.';return;}
-    note.textContent='Requesting device location…';navigator.geolocation.getCurrentPosition(pos=>{const form=btn.closest('form');form.elements[`${p}-lat`].value=pos.coords.latitude.toFixed(6);form.elements[`${p}-lng`].value=pos.coords.longitude.toFixed(6);note.textContent=`Location captured · accuracy about ${Math.round(pos.coords.accuracy)} m`;},()=>{note.textContent='Location permission was not available. Enter a map coordinate if needed.'},{enableHighAccuracy:true,timeout:12000});
+    note.textContent='Requesting device location…';navigator.geolocation.getCurrentPosition(pos=>{setMapPin(p,pos.coords.latitude,pos.coords.longitude,{zoom:17,status:`Device position captured · accuracy about ${Math.round(pos.coords.accuracy)} m`});note.textContent=`Device location captured · accuracy about ${Math.round(pos.coords.accuracy)} m`;},()=>{note.textContent='Location permission was not available. Place the pin on the map or enter coordinates.'},{enableHighAccuracy:true,timeout:12000});
   });});
+  $$('[data-map-layer]',root).forEach(btn=>{if(btn.dataset.layerWired)return;btn.dataset.layerWired='1';btn.addEventListener('click',()=>setMapLayer(btn.dataset.mapPrefix,btn.dataset.mapLayer));});
 }
 function fillSelect(sel,values,placeholder){if(!sel)return;sel.innerHTML=`<option value="">${esc(placeholder)}</option>`+values.map(v=>`<option>${esc(v)}</option>`).join('');}
 function fillCityList(prefix,stateCode,districtCode){const list=$(`#${prefix}-city-list`);if(!list)return;const items=locationMeta.cities.filter(x=>x.stateCode===stateCode&&(!districtCode||!x.districtCode||x.districtCode===districtCode));list.innerHTML=items.map(c=>`<option value="${esc(c.name)}"></option>`).join('');}
+async function loadMapConfig(){
+  if(state.mapConfig)return state.mapConfig;
+  try{const response=await fetch('/api/map-config');state.mapConfig=response.ok?await response.json():{satelliteEnabled:false,mapTilerKey:''};}
+  catch{state.mapConfig={satelliteEnabled:false,mapTilerKey:''};}
+  return state.mapConfig;
+}
+function mapStatus(prefix,message){const el=$(`#${prefix}-map-status`);if(el)el.textContent=message;}
+function setMapPin(prefix,latitude,longitude,{zoom=16,status='Pin selected. Drag it to refine the location.'}={}){
+  const lat=Number(latitude),lng=Number(longitude),picker=state.mapPickers[prefix];
+  if(!Number.isFinite(lat)||!Number.isFinite(lng)||lat < -90||lat > 90||lng < -180||lng > 180){mapStatus(prefix,'Enter valid latitude and longitude coordinates.');return;}
+  const latInput=$(`[name="${prefix}-lat"]`),lngInput=$(`[name="${prefix}-lng"]`);
+  if(latInput)latInput.value=lat.toFixed(6);if(lngInput)lngInput.value=lng.toFixed(6);
+  if(!picker)return;
+  const point=[lat,lng];
+  if(picker.marker)picker.marker.setLatLng(point);
+  else{
+    picker.marker=window.L.marker(point,{draggable:true,icon:window.L.divIcon({className:'civic-map-pin',html:'<span></span>',iconSize:[28,36],iconAnchor:[14,34]})}).addTo(picker.map);
+    picker.marker.on('dragend',()=>{const p=picker.marker.getLatLng();setMapPin(prefix,p.lat,p.lng,{status:'Pin moved to the selected location.'});});
+  }
+  if(zoom)picker.map.flyTo(point,zoom,{duration:.65});else picker.map.panTo(point);
+  mapStatus(prefix,status);
+}
+function clearMapPin(prefix){
+  const latInput=$(`[name="${prefix}-lat"]`),lngInput=$(`[name="${prefix}-lng"]`);if(latInput)latInput.value='';if(lngInput)lngInput.value='';
+  const picker=state.mapPickers[prefix];if(picker?.marker){picker.map.removeLayer(picker.marker);picker.marker=null;}
+  mapStatus(prefix,'Area changed. Choose the exact issue point on the map or use your device location.');
+}
+function setMapLayer(prefix,name){
+  const picker=state.mapPickers[prefix];if(!picker)return;
+  const layer=name==='satellite'?picker.satelliteLayer:picker.streetLayer;
+  if(!layer){mapStatus(prefix,'Satellite imagery is not configured yet. Add a restricted MapTiler key to enable it.');return;}
+  for(const candidate of [picker.streetLayer,picker.satelliteLayer])if(candidate&&picker.map.hasLayer(candidate))picker.map.removeLayer(candidate);
+  layer.addTo(picker.map);picker.activeLayer=name;
+  $$(`[data-map-prefix="${prefix}"][data-map-layer]`).forEach(button=>{const active=button.dataset.mapLayer===name;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
+  if(name==='satellite')mapStatus(prefix,'Satellite imagery enabled. Click the map to place the issue pin.');
+  else mapStatus(prefix,'Street map enabled. Click the map to place the issue pin.');
+}
+async function initializeMapPicker(prefix){
+  const element=$(`#${prefix}-map`);if(!element)return;if(!window.L){mapStatus(prefix,'Interactive map could not load. You can still enter coordinates manually.');return;}
+  const config=await loadMapConfig();if(!element.isConnected)return;
+  if(state.mapPickers[prefix]){state.mapPickers[prefix].map.remove();delete state.mapPickers[prefix];}
+  const L=window.L,map=L.map(element,{scrollWheelZoom:false,zoomControl:true}).setView([22.9734,78.6569],4.6);
+  const attribution='© OpenStreetMap contributors';
+  const streetLayer=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution});
+  const satelliteLayer=config.mapTilerKey?L.tileLayer(`https://api.maptiler.com/maps/satellite-v4/{z}/{x}/{y}.jpg?key=${encodeURIComponent(config.mapTilerKey)}`,{tileSize:512,zoomOffset:-1,maxZoom:20,attribution:'© MapTiler © OpenStreetMap contributors'}):null;
+  state.mapPickers[prefix]={map,marker:null,streetLayer,satelliteLayer,config,activeLayer:null,geocodeSequence:0};
+  streetLayer.on('tileerror',()=>mapStatus(prefix,'Street map tiles could not load. Check this device’s internet connection.'));
+  satelliteLayer?.on('tileerror',()=>mapStatus(prefix,'Satellite tiles could not load. Check the MapTiler key and its allowed website origins.'));
+  map.on('click',event=>setMapPin(prefix,event.latlng.lat,event.latlng.lng,{status:'Issue location pinned. Drag the marker to refine it.'}));
+  if(satelliteLayer)setMapLayer(prefix,'satellite');else{
+    streetLayer.addTo(map);state.mapPickers[prefix].activeLayer='street';
+    $$(`[data-map-prefix="${prefix}"][data-map-layer]`).forEach(button=>{const active=button.dataset.mapLayer==='street';button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));if(button.dataset.mapLayer==='satellite'){button.disabled=true;button.title='Add MAPTILER_API_KEY to enable satellite imagery';}});
+    mapStatus(prefix,'Street map is ready. To enable satellite imagery, configure a free MapTiler key for this site.');
+  }
+  setTimeout(()=>{if(element.isConnected)map.invalidateSize();},120);
+  const latText=$(`[name="${prefix}-lat"]`)?.value?.trim(),lngText=$(`[name="${prefix}-lng"]`)?.value?.trim();
+  if(latText!==''&&lngText!==''){const lat=Number(latText),lng=Number(lngText);if(Number.isFinite(lat)&&Number.isFinite(lng))setMapPin(prefix,lat,lng,{zoom:16,status:'Saved coordinates loaded. Drag the pin to refine it.'});}
+  else centerMapToArea(prefix);
+}
+async function centerMapToArea(prefix){
+  const picker=state.mapPickers[prefix];if(!picker||!picker.config.mapTilerKey)return;
+  const parts=['city','subdistrict','district','state'].map(key=>$(`#${prefix}-${key}`)?.value?.trim()).filter(Boolean);
+  if(!parts.length)return;
+  const sequence=++picker.geocodeSequence,query=[...parts,'India'].join(', ');
+  try{
+    const url=`https://api.maptiler.com/geocoding/${encodeURIComponent(query)}.json?key=${encodeURIComponent(picker.config.mapTilerKey)}&country=in&limit=1&language=en`;
+    const response=await fetch(url);if(!response.ok)throw new Error('Map search is temporarily unavailable.');
+    const result=await response.json();if(sequence!==picker.geocodeSequence||!picker.map.getContainer().isConnected)return;
+    const center=result.features?.[0]?.center;if(!center)return;
+    const zoom=parts.length>=3?14:parts.length===2?10:6;
+    picker.map.flyTo([center[1],center[0]],zoom,{duration:.8});
+    mapStatus(prefix,'Area centered on the map. Click to choose the exact issue point.');
+  }catch{if(sequence===picker.geocodeSequence)mapStatus(prefix,'Could not find that area on the map. You can still pan and pin the location manually.');}
+}
 function primeLocationFields(prefix,location,root=modalRoot){
   const stateName=location.state||'',stateEl=$(`#${prefix}-state`,root),districtEl=$(`#${prefix}-district`,root),subEl=$(`#${prefix}-subdistrict`,root),cityEl=$(`#${prefix}-city`,root);
   if(!stateEl||!districtEl||!subEl||!cityEl)return;
@@ -87,11 +170,7 @@ function renderAuth(mode='login',role='citizen'){
     <div class="auth-side"><div class="auth-card"><div class="eyebrow">CIVICFLOW · INDIA</div><h2>${mode==='register'?'Create your account':'Welcome back'}</h2><p>${mode==='register'?'Join your local civic response network.':'Sign in to your city workspace.'}</p>
     ${mode==='login'?`<div class="auth-tabs"><button class="${role==='citizen'?'active':''}" data-role="citizen">Citizen</button><button class="${role==='admin'?'active':''}" data-role="admin">Admin / Head</button><button class="${role==='contractor'?'active':''}" data-role="contractor">Contractor</button></div>
       <form id="login-form">${field('Email address','email','email','you@example.com')}${field('Password','password','password','Enter your password')}<button class="btn btn-primary btn-block" type="submit"><span>Sign in</span><span aria-hidden="true">→</span></button></form>
-      <div class="demo-box"><div class="demo-box-head">Demo access · tap to fill</div>
-        <div class="demo-account"><span>Admin · city supervisor</span><button data-demo="admin">Fill login</button></div>
-        <div class="demo-account"><span>Citizen · submit & track</span><button data-demo="citizen">Fill login</button></div>
-        <div class="demo-account"><span>Contractor · progress updates</span><button data-demo="contractor">Fill login</button></div>
-      </div><p class="hint" style="margin-top:16px">New citizen? <button class="link-button" data-auth-mode="register">Create an account</button> · Contractor? <button class="link-button" data-register-contractor>Apply to join</button></p>
+      <p class="hint" style="margin-top:16px">New citizen? <button class="link-button" data-auth-mode="register">Create an account</button> · Contractor? <button class="link-button" data-register-contractor>Apply to join</button></p>
     `:`<form id="register-form"><div class="auth-tabs"><button type="button" class="${role==='citizen'?'active':''}" data-role="citizen">Citizen</button><button type="button" class="${role==='contractor'?'active':''}" data-role="contractor">Contractor</button></div><input type="hidden" name="role" value="${role}">
       ${field('Full name','fullName','text','As shown on your profile')}${field('Email address','email','email','you@example.com')}${field('Mobile number','phone','tel','10-digit mobile number',true,'autocomplete="tel" inputmode="tel"')}${field('Create password','password','password','At least 8 characters')}
       ${role==='citizen'?`<div class="form-section">Home area · for local city notices <span class="hint">(optional)</span></div>${locationFields('home',{city:true,address:false,map:false,required:false})}`:''}
@@ -108,10 +187,6 @@ function renderAuth(mode='login',role='citizen'){
   $$('[data-role]',app).forEach(btn=>btn.addEventListener('click',()=>{const next=btn.dataset.role;if(mode==='register')renderAuth('register',next);else renderAuth('login',next);}));
   $$('[data-auth-mode]',app).forEach(btn=>btn.addEventListener('click',()=>renderAuth(btn.dataset.authMode,'citizen')));
   $('[data-register-contractor]',app)?.addEventListener('click',()=>renderAuth('register','contractor'));
-  $$('[data-demo]',app).forEach(btn=>btn.addEventListener('click',()=>{
-    const data={admin:['admin@civicflow.demo','Admin@12345'],citizen:['citizen@civicflow.demo','Citizen@123'],contractor:['contractor@civicflow.demo','Contractor@123']}[btn.dataset.demo];
-    $('#login-form').elements.email.value=data[0];$('#login-form').elements.password.value=data[1];
-  }));
   $('#login-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,b=f.querySelector('[type=submit]');b.disabled=true;b.textContent='Signing in…';try{const r=await api('/api/auth/login',{method:'POST',body:JSON.stringify({email:f.elements.email.value,password:f.elements.password.value})});setSession(r);await loadWorkspace();}catch(x){toast(x.message,'error');b.disabled=false;b.innerHTML='Sign in <span>→</span>';}});
   $('#register-form')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,fd=new FormData(f),body={fullName:fd.get('fullName'),email:fd.get('email'),phone:fd.get('phone'),password:fd.get('password'),role:fd.get('role')};
     if(body.role==='citizen'){
@@ -289,11 +364,11 @@ function openComplaintForm(){
     <div class="form-section">Photo or document evidence <span class="hint">· up to 5 files, 8 MB each</span></div><div class="upload-box"><input name="photos" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple><div class="hint">A photo can help the team understand the issue before they arrive.</div></div>
     <div class="callout">Your report is visible to the assigned city team. Your phone and email stay private. You can follow all progress updates here.</div>
     </div><div class="modal-foot"><button type="button" class="btn btn-quiet" data-close>Cancel</button><button type="submit" class="btn btn-primary">Submit complaint →</button></div></form></section></div>`;
-  wireLocation(modalRoot);wireModalClose();
+  wireLocation(modalRoot);wireModalClose();initializeMapPicker('complaint');
   $('#complaint-form',modalRoot).addEventListener('submit',async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type=submit]');b.disabled=true;b.textContent='Submitting…';const fd=new FormData(e.currentTarget);fd.set('state',fd.get('complaint-state'));fd.set('district',fd.get('complaint-district'));fd.set('subdistrict',fd.get('complaint-subdistrict'));fd.set('city',fd.get('complaint-city'));fd.set('address',fd.get('complaint-address'));fd.set('lat',fd.get('complaint-lat'));fd.set('lng',fd.get('complaint-lng'));try{const r=await api('/api/complaints',{method:'POST',body:fd});closeModal();toast(r.autoAssigned?'Complaint submitted and routed to a matching contractor.':'Complaint submitted. It is awaiting contractor coverage.');state.page='complaints';await loadWorkspace(true);}catch(x){toast(x.message,'error');b.disabled=false;b.textContent='Submit complaint →';}});
 }
 function wireModalClose(){ $$('[data-close]',modalRoot).forEach(b=>b.addEventListener('click',closeModal));$('.modal-backdrop',modalRoot)?.addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal();}); }
-function closeModal(){modalRoot.innerHTML='';}
+function closeModal(){for(const picker of Object.values(state.mapPickers)){picker.map.remove();picker.geocodeSequence++;}state.mapPickers={};modalRoot.innerHTML='';}
 async function findSimilarComplaints(id){
   const results=$('#similar-results',modalRoot),button=$('#find-similar',modalRoot),radius=$('#similar-radius',modalRoot)?.value||500;
   if(!results||!button)return;button.disabled=true;button.textContent='Checking…';results.innerHTML='<p class="hint">Checking recent reports in this category and area…</p>';
