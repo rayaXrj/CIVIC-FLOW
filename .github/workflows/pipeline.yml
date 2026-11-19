@@ -21,7 +21,7 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts
       - run: npm test
-      - run: node --check server.js && node --check db.js && node --check seed.js && node --check public/app.js
+      - run: node --check server.js && node --check db.js && node --check seed.js && node --check incident-similarity.js && node --check public/app.js
       - run: npm audit --omit=dev --audit-level=high
       - name: Start full Docker stack
         run: |

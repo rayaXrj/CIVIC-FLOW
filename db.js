@@ -25,6 +25,20 @@ async function initDb(){
   );
   CREATE TABLE IF NOT EXISTS announcements (
     id SERIAL PRIMARY KEY, title VARCHAR(140) NOT NULL, body VARCHAR(1000) NOT NULL, severity VARCHAR(20) NOT NULL DEFAULT 'info', audience VARCHAR(20) NOT NULL DEFAULT 'all', author_id INT REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ALTER TABLE announcements ADD COLUMN IF NOT EXISTS state VARCHAR(100);
+  ALTER TABLE announcements ADD COLUMN IF NOT EXISTS district VARCHAR(100);
+  ALTER TABLE announcements ADD COLUMN IF NOT EXISTS subdistrict VARCHAR(140);
+  ALTER TABLE announcements ADD COLUMN IF NOT EXISTS city VARCHAR(140);
+  CREATE INDEX IF NOT EXISTS announcements_location_created_idx ON announcements(state,district,subdistrict,city,created_at DESC);
+  CREATE TABLE IF NOT EXISTS complaint_groups (
+    id SERIAL PRIMARY KEY, title VARCHAR(180) NOT NULL, category VARCHAR(80) NOT NULL,
+    created_by INT REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS complaint_group_members (
+    complaint_id INT PRIMARY KEY REFERENCES complaints(id) ON DELETE CASCADE,
+    group_id INT NOT NULL REFERENCES complaint_groups(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );`);
 }
 module.exports={pool,initDb};

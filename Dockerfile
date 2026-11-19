@@ -9,7 +9,7 @@ ENV NODE_ENV=production
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
-COPY package*.json server.js db.js seed.js ./
+COPY package*.json server.js db.js seed.js incident-similarity.js ./
 COPY public ./public
 RUN mkdir -p /app/uploads && chown -R node:node /app
 USER node

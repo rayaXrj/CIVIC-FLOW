@@ -10,9 +10,13 @@ Citizens report local issues. City administrators supervise and route the work. 
 - Cascading **State / Union Territory → District → Taluka / Tehsil / Sub-district → City / Town / Urban Local Body** selectors. The directory is bundled locally, so these selectors work without calling a location API.
 - Optional device location capture and map coordinates; address hierarchy remains available if GPS permission is unavailable.
 - Automatic routing to an approved contractor matching complaint category and service state/district, with the least active workload preferred.
-- Admin assignment override, contractor application review, response dashboards, overdue flags, audit history, and city notices.
+- Admin assignment override, contractor application review, response dashboards, overdue flags, audit history, and location-targeted city notices.
 - Contractor work queue with status changes, progress messages, and photo/PDF evidence uploads.
-- Live dashboard refresh over Socket.IO, responsive layouts, animated interactions, searchable complaint list, and category charts.
+- Live complaint totals (filed, solved, and pending) on the welcome screen; dashboards refresh over Socket.IO and include a ranked state-to-district report explorer.
+- City notices include state, district, taluka, and a manually entered city. Citizens can set a home area during registration or later in Account to receive notices for their city; admins and service-area contractors see notices they manage or cover.
+- Cascading complaint-desk filters for State / UT → District → Taluka / Tehsil, plus search across issue descriptions and locations.
+- Profile editing for citizens, admins, and contractors, including a private profile-photo upload; contractor service coverage and categories can also be updated.
+- Admin-assisted related-incident discovery: compares complaint title/description and category, checks GPS distance within a chosen radius, and falls back to matching taluka/city when coordinates are unavailable. Grouping preserves each original complaint, reporter, status, and timeline.
 - Role-scoped attachment access: only the reporter, assigned contractor, and admins can open complaint evidence.
 - PostgreSQL persistence, Docker Compose, health checks, GitHub Actions CI, GHCR image publishing, vulnerability scanning, and optional SSH staging deployment.
 
@@ -62,7 +66,9 @@ Demo accounts are created on first start. Use the “Fill login” shortcuts on 
 | Contractor | `contractor@civicflow.demo` | `Contractor@123` |
 | Contractor 2 | `contractor2@civicflow.demo` | `Contractor@123` |
 
-For the classroom demo, `DEMO_MODE=true` creates sample reports and contractor accounts. To make a clean database without demo content, set `DEMO_MODE=false` in `.env` before the first launch. Existing database volumes are not reseeded or reset automatically.
+The demo also creates citizens `citizen2@civicflow.demo` through `citizen5@civicflow.demo` (password `Citizen@123`) and contractors `contractor3@civicflow.demo` through `contractor16@civicflow.demo` (password `Contractor@123`). The 16 approved demo contractors provide **two crews for each service category**. Their phone numbers are intentionally invalid demo-only values.
+
+With `DEMO_MODE=true`, startup safely adds 32 sample complaints across six Karnataka districts and the demo accounts if they are missing. The seed is repeatable and does not reset user reports or database volumes. Set `DEMO_MODE=false` to skip demo seeding.
 
 ## Demonstrate with 3–4 devices
 
@@ -78,10 +84,10 @@ For the classroom demo, `DEMO_MODE=true` creates sample reports and contractor a
 4. If Windows Firewall asks, allow Docker Desktop / the app on your **private network**. Use a trusted network for the demonstration.
 5. Suggested live sequence:
    - **Laptop — admin:** sign in as `admin@civicflow.demo`, open the complaint desk, and keep it visible.
-   - **Phone 1 — citizen:** sign in as `citizen@civicflow.demo`, submit a “Streetlights” or “Roads & Potholes” report for Maharashtra → Pune → Pune/Haveli. Attach a photo if available.
-   - **Phone 2 — contractor:** sign in as `contractor@civicflow.demo`; the new matching report appears in the assigned work list. Open it, set **In progress**, post an update, and attach a progress photo.
+   - **Phone 1 — citizen:** sign in as `citizen@civicflow.demo`, submit a “Streetlights” or “Roads & Potholes” report for Karnataka → Bengaluru Urban → Bengaluru East → Bengaluru. Attach a photo if available.
+   - **Phone 2 — contractor:** sign in as `contractor@civicflow.demo`; matching streetlight work appears in the assigned work list. Open it, set **In progress**, post an update, and attach a progress photo.
    - **Phone 3 — admin or citizen:** observe the live dashboard/timeline update. Admin can reassign work; the citizen can see the progress without seeing staff-only audit controls.
-6. For an assignment that definitely matches the seeded contractors, use **Maharashtra → Pune → Haveli → Pune** and category **Streetlights** or **Water & Drainage**.
+6. For an assignment that definitely matches a seeded contractor, choose any of the six seeded Karnataka districts and one of the listed service categories. The two crews for that category are assigned to the central or coastal/northern district group.
 
 GPS access may be blocked by mobile browsers on a local plain-HTTP address. The address selectors and manual location fields still work; use HTTPS if you need mobile GPS during a demonstration.
 

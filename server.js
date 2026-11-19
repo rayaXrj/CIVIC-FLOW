@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const { Server } = require('socket.io');
 const { pool, initDb } = require('./db');
 const { seed } = require('./seed');
+const { compareIncident } = require('./incident-similarity');
 
 const app = express();
 const server = http.createServer(app);
@@ -34,13 +35,14 @@ const upload = multer({ storage, limits: { fileSize: 8 * 1024 * 1024, files: 5 }
 
 const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 50, standardHeaders: true, legacyHeaders: false });
 const clean = (v, max = 500) => String(v ?? '').trim().slice(0, max);
+const listInput = value => (Array.isArray(value) ? value : value ? [value] : []).map(v => clean(v, 140)).filter(Boolean);
 const makeToken = user => jwt.sign({ id: user.id, role: user.role, name: user.full_name }, JWT_SECRET, { expiresIn: '12h' });
 function auth(...roles) {
   return async (req, res, next) => {
     try {
       const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
       const decoded = jwt.verify(token, JWT_SECRET);
-      const { rows } = await pool.query('SELECT id, full_name, email, phone, role, company, categories, service_states, service_districts, approval_status FROM users WHERE id=$1', [decoded.id]);
+      const { rows } = await pool.query('SELECT id, full_name, email, phone, role, company, categories, service_states, service_districts, approval_status, profile_json FROM users WHERE id=$1', [decoded.id]);
       if (!rows[0]) return res.status(401).json({ error: 'Account not found.' });
       req.user = rows[0];
       if (roles.length && !roles.includes(req.user.role)) return res.status(403).json({ error: 'You do not have permission for this action.' });
@@ -58,6 +60,16 @@ app.get('/api/health', async (_req, res) => {
 });
 app.get('/api/meta', (_req, res) => res.json({ categories, locationData: 'bundled', roles: ['citizen', 'admin', 'contractor'] }));
 
+app.get('/api/public/stats', async (_req,res)=>{
+  try{
+    const {rows}=await pool.query(`SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE status IN ('resolved','closed'))::int AS solved,
+      COUNT(*) FILTER (WHERE status NOT IN ('resolved','closed'))::int AS pending
+      FROM complaints`);
+    res.set('Cache-Control','public, max-age=30');res.json(rows[0]);
+  }catch(e){err(res,e);}
+});
+
 app.get('/api/media/:filename', async (req,res)=>{
   try{
     const decoded=jwt.verify(String(req.query.token||''),JWT_SECRET);
@@ -70,7 +82,8 @@ app.get('/api/media/:filename', async (req,res)=>{
         WHERE p.complaint_id=c.id AND f->>'url'=$1
       )`,[fileUrl]);
     const user=userResult.rows[0];
-    const allowed=user.role==='admin'||visible.rows.some(c=>c.citizen_id===user.id||c.assigned_to===user.id);
+    const profilePhoto=await pool.query(`SELECT id FROM users WHERE profile_json->>'avatarUrl'=$1 AND (id=$2 OR $3::text='admin')`,[fileUrl,user.id,user.role]);
+    const allowed=user.role==='admin'||visible.rows.some(c=>c.citizen_id===user.id||c.assigned_to===user.id)||profilePhoto.rowCount>0;
     if(!allowed)return res.status(404).json({error:'File not found.'});
     const absolute=path.join(uploadDir,path.basename(req.params.filename));
     if(!fs.existsSync(absolute))return res.status(404).json({error:'File not found.'});
@@ -92,11 +105,17 @@ app.post('/api/auth/register', loginLimit, async (req, res) => {
     const states = contractor ? (Array.isArray(req.body.serviceStates) ? req.body.serviceStates : []) : [];
     const districts = contractor ? (Array.isArray(req.body.serviceDistricts) ? req.body.serviceDistricts : []) : [];
     if (contractor && (!req.body.company || !categoriesInput.length || !states.length)) return res.status(400).json({ error: 'Contractors must add company, categories, and at least one service state.' });
+    const homeLocation=contractor?{}:{homeState:clean(req.body.homeState,100),homeDistrict:clean(req.body.homeDistrict,100),homeSubdistrict:clean(req.body.homeSubdistrict,140),homeCity:clean(req.body.homeCity,140)};
+    const homeValues=Object.values(homeLocation),hasHomeLocation=homeValues.some(Boolean);
+    if(!contractor&&hasHomeLocation&&homeValues.some(value=>!value))return res.status(400).json({error:'Complete the full home area or leave it blank. It is used to show notices for your city.'});
+    const profile=contractor?{
+      address: clean(req.body.address,300), city: clean(req.body.city,100), state: clean(req.body.state,100), district: clean(req.body.district,100), subdistrict: clean(req.body.subdistrict,100), experience: clean(req.body.experience,80), gst: clean(req.body.gst,40), serviceRadius: clean(req.body.serviceRadius,30)
+    }:homeLocation;
     const { rows } = await pool.query(`INSERT INTO users (full_name,email,phone,password_hash,role,company,categories,service_states,service_districts,approval_status,profile_json)
-      VALUES ($1,lower($2),$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,full_name,email,phone,role,company,categories,service_states,service_districts,approval_status`,
+      VALUES ($1,lower($2),$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,full_name,email,phone,role,company,categories,service_states,service_districts,approval_status,profile_json`,
       [clean(fullName,100), clean(email,180), clean(phone,24), hash, role, contractor ? clean(req.body.company,140) : null, categoriesInput, states, districts, contractor ? 'pending' : 'approved', contractor ? {
         address: clean(req.body.address,300), city: clean(req.body.city,100), state: clean(req.body.state,100), district: clean(req.body.district,100), subdistrict: clean(req.body.subdistrict,100), experience: clean(req.body.experience,80), gst: clean(req.body.gst,40), serviceRadius: clean(req.body.serviceRadius,30)
-      } : {}]);
+      } : profile]);
     if (contractor) return res.status(201).json({ pending: true, message: 'Profile sent to the city admin for verification.' });
     res.status(201).json({ token: makeToken(rows[0]), user: rows[0] });
   } catch (e) { err(res, e.code === '23505' ? Object.assign(new Error('An account with this email already exists.'), { status: 409 }) : e); }
@@ -114,10 +133,89 @@ app.post('/api/auth/login', loginLimit, async (req, res) => {
 });
 app.get('/api/auth/me', auth(), (req, res) => res.json({ user: req.user }));
 
+app.put('/api/profile', auth(), upload.single('avatar'), async (req,res)=>{
+  try{
+    const fullName=clean(req.body.fullName,100),email=clean(req.body.email,180).toLowerCase(),phone=clean(req.body.phone,24);
+    if(!fullName||!email||!phone)return res.status(400).json({error:'Name, email, and mobile number are required.'});
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:'Enter a valid email address.'});
+    if(!/^\+?[\d\s()-]{10,20}$/.test(phone))return res.status(400).json({error:'Enter a valid mobile number, including country code if needed.'});
+    if(req.file&&!/^image\/(jpeg|png|webp)$/.test(req.file.mimetype))return res.status(400).json({error:'Profile photos must be JPG, PNG, or WEBP images.'});
+    const oldProfile=req.user.profile_json||{};
+    const profile={...oldProfile};
+    if(req.user.role==='contractor'){
+      const categoriesInput=listInput(req.body.categories).filter(c=>categories.includes(c));
+      const serviceState=clean(req.body.state,100),serviceDistrict=clean(req.body.district,100);
+      if(!clean(req.body.company,140)||!categoriesInput.length||!serviceState||!serviceDistrict)return res.status(400).json({error:'Contractor profiles need a company, category, state, and district.'});
+      profile.state=serviceState;profile.district=serviceDistrict;profile.subdistrict=clean(req.body.subdistrict,140);profile.city=clean(req.body.city,140);
+      profile.address=clean(req.body.address,300);profile.experience=clean(req.body.experience,80);profile.gst=clean(req.body.gst,40);profile.serviceRadius=clean(req.body.serviceRadius,30);
+      profile.businessAddress=clean(req.body.address,300);
+      if(req.file)profile.avatarUrl=`/uploads/${req.file.filename}`;
+      const result=await pool.query(`UPDATE users SET full_name=$1,email=$2,phone=$3,company=$4,categories=$5,service_states=$6,service_districts=$7,profile_json=$8
+        WHERE id=$9 RETURNING id,full_name,email,phone,role,company,categories,service_states,service_districts,approval_status,profile_json`,
+        [fullName,email,phone,clean(req.body.company,140),categoriesInput,[serviceState],[serviceDistrict],JSON.stringify(profile),req.user.id]);
+      io.emit('contractor:changed',{id:req.user.id});return res.json({user:result.rows[0]});
+    }
+    if(req.user.role==='citizen'){
+      const homeLocation={homeState:clean(req.body.homeState,100),homeDistrict:clean(req.body.homeDistrict,100),homeSubdistrict:clean(req.body.homeSubdistrict,140),homeCity:clean(req.body.homeCity,140)};
+      const homeValues=Object.values(homeLocation),hasHomeLocation=homeValues.some(Boolean);
+      if(hasHomeLocation&&homeValues.some(value=>!value))return res.status(400).json({error:'Complete the full home area or leave it blank. It is used to show notices for your city.'});
+      Object.assign(profile,homeLocation);
+    }
+    if(req.file)profile.avatarUrl=`/uploads/${req.file.filename}`;
+    const result=await pool.query(`UPDATE users SET full_name=$1,email=$2,phone=$3,profile_json=$4 WHERE id=$5
+      RETURNING id,full_name,email,phone,role,company,categories,service_states,service_districts,approval_status,profile_json`,[fullName,email,phone,JSON.stringify(profile),req.user.id]);
+    res.json({user:result.rows[0]});
+  }catch(e){err(res,e.code==='23505'?Object.assign(new Error('An account with this email already exists.'),{status:409}):e);}
+});
+
 const complaintSelect = `SELECT c.*, u.full_name AS citizen_name,
   a.full_name AS contractor_name, a.phone AS contractor_phone, a.company AS contractor_company,
-  a.email AS contractor_email, (SELECT json_agg(json_build_object('id',p.id,'message',p.message,'status',p.status,'created_at',p.created_at,'author_name',x.full_name,'author_role',x.role,'files',p.files) ORDER BY p.created_at DESC) FROM progress_updates p JOIN users x ON x.id=p.author_id WHERE p.complaint_id=c.id) AS updates
-  FROM complaints c JOIN users u ON c.citizen_id=u.id LEFT JOIN users a ON c.assigned_to=a.id`;
+  a.email AS contractor_email, cg.id AS group_id, cg.title AS group_title, cg.created_at AS group_created_at,
+  (SELECT COUNT(*)::int FROM complaint_group_members gm2 WHERE gm2.group_id=cg.id) AS group_size,
+  (SELECT json_agg(json_build_object('id',p.id,'message',p.message,'status',p.status,'created_at',p.created_at,'author_name',x.full_name,'author_role',x.role,'files',p.files) ORDER BY p.created_at DESC) FROM progress_updates p JOIN users x ON x.id=p.author_id WHERE p.complaint_id=c.id) AS updates
+  FROM complaints c JOIN users u ON c.citizen_id=u.id LEFT JOIN users a ON c.assigned_to=a.id
+  LEFT JOIN complaint_group_members gm ON gm.complaint_id=c.id LEFT JOIN complaint_groups cg ON cg.id=gm.group_id`;
+
+app.get('/api/complaints/:id/similar',auth('admin'),async(req,res)=>{
+  try{
+    const id=Number(req.params.id),radius=Math.min(3000,Math.max(100,Number(req.query.radius)||500));
+    const sourceResult=await pool.query(`SELECT * FROM complaints WHERE id=$1`,[id]);
+    if(!sourceResult.rows[0])return res.status(404).json({error:'Complaint not found.'});
+    const inGroup=await pool.query('SELECT 1 FROM complaint_group_members WHERE complaint_id=$1',[id]);
+    if(inGroup.rowCount)return res.status(409).json({error:'This complaint already belongs to a group.'});
+    const candidates=await pool.query(`SELECT c.* FROM complaints c
+      WHERE c.id<>$1 AND c.category=$2 AND c.created_at>NOW()-INTERVAL '90 days'
+      AND NOT EXISTS(SELECT 1 FROM complaint_group_members gm WHERE gm.complaint_id=c.id)
+      ORDER BY c.created_at DESC LIMIT 500`,[id,sourceResult.rows[0].category]);
+    const suggestions=candidates.rows.map(c=>compareIncident(sourceResult.rows[0],c,radius)).filter(Boolean)
+      .sort((a,b)=>b.score-a.score||(a.distanceMeters??Infinity)-(b.distanceMeters??Infinity)).slice(0,20);
+    res.json({radiusMeters:radius,suggestions});
+  }catch(e){err(res,e);}
+});
+
+app.post('/api/complaint-groups',auth('admin'),async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const ids=[...new Set((Array.isArray(req.body.complaintIds)?req.body.complaintIds:[]).map(Number).filter(Number.isInteger))];
+    if(ids.length<2||ids.length>20)return res.status(400).json({error:'Choose between 2 and 20 related complaints to group.'});
+    await client.query('BEGIN');
+    const complaints=await client.query('SELECT id,title,category,state,district,subdistrict,city FROM complaints WHERE id=ANY($1::int[])',[ids]);
+    if(complaints.rowCount!==ids.length){await client.query('ROLLBACK');return res.status(404).json({error:'One or more complaints could not be found.'});}
+    const alreadyGrouped=await client.query('SELECT complaint_id FROM complaint_group_members WHERE complaint_id=ANY($1::int[])',[ids]);
+    if(alreadyGrouped.rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'A selected complaint is already in a group. Refresh the complaint desk and try again.'});}
+    const root=complaints.rows.find(c=>c.id===ids[0])||complaints.rows[0];
+    if(complaints.rows.some(c=>c.category!==root.category)){await client.query('ROLLBACK');return res.status(400).json({error:'Group reports from the same service category only.'});}
+    const groupTitle=clean(req.body.title,180)||`${root.category} · ${root.subdistrict}, ${root.city}`;
+    const inserted=await client.query('INSERT INTO complaint_groups(title,category,created_by) VALUES($1,$2,$3) RETURNING id,title,category,created_at',[groupTitle,root.category,req.user.id]);
+    const group=inserted.rows[0];
+    await client.query('INSERT INTO complaint_group_members(complaint_id,group_id) SELECT unnest($1::int[]),$2',[ids,group.id]);
+    for(const complaintId of ids)await client.query(`INSERT INTO audit_events(complaint_id,actor_id,action,details) VALUES($1,$2,'grouped_as_related',$3)`,[complaintId,req.user.id,JSON.stringify({groupId:group.id,title:group.title,memberCount:ids.length})]);
+    await client.query('COMMIT');
+    ids.forEach(complaintId=>io.emit('complaint:changed',{id:complaintId}));
+    res.status(201).json({group,complaintIds:ids});
+  }catch(e){await client.query('ROLLBACK');err(res,e);}
+  finally{client.release();}
+});
 
 app.get('/api/dashboard', auth(), async (req, res) => {
   try {
@@ -138,8 +236,24 @@ app.get('/api/dashboard', auth(), async (req, res) => {
         COUNT(*) FILTER (WHERE status='resolved')::int resolved, 0::int overdue FROM complaints c WHERE ${user.role === 'citizen' ? 'citizen_id' : 'assigned_to'}=$1`, [user.id])).rows[0];
     }
     const contractors = user.role === 'admin' ? (await pool.query(`SELECT id,full_name,email,phone,company,categories,service_states,service_districts,approval_status,profile_json,created_at FROM users WHERE role='contractor' ORDER BY approval_status,full_name`)).rows : [];
-    const notices = (await pool.query(`SELECT id,title,body,severity,created_at FROM announcements WHERE audience IN ('all',$1) ORDER BY created_at DESC LIMIT 5`, [user.role])).rows;
-    res.json({ complaints: complaints.rows, stats, contractors, notices, categories });
+    const geoSummary=(await pool.query(`SELECT state,district,COUNT(*)::int AS count FROM complaints GROUP BY state,district`)).rows;
+    let notices;
+    if(user.role==='admin'){
+      notices=(await pool.query(`SELECT id,title,body,severity,created_at,state,district,subdistrict,city FROM announcements ORDER BY created_at DESC LIMIT 50`)).rows;
+    }else if(user.role==='citizen'){
+      const profile=user.profile_json||{};
+      notices=(await pool.query(`SELECT id,title,body,severity,created_at,state,district,subdistrict,city FROM announcements
+        WHERE audience IN ('all',$1) AND (state IS NULL OR (
+          LOWER(state)=LOWER($2) AND (district IS NULL OR LOWER(district)=LOWER($3))
+          AND (subdistrict IS NULL OR LOWER(subdistrict)=LOWER($4)) AND (city IS NULL OR LOWER(city)=LOWER($5))))
+        ORDER BY created_at DESC LIMIT 20`,[user.role,profile.homeState||'',profile.homeDistrict||'',profile.homeSubdistrict||'',profile.homeCity||''])).rows;
+    }else{
+      const serviceStates=user.service_states||[],serviceDistricts=user.service_districts||[];
+      notices=(await pool.query(`SELECT id,title,body,severity,created_at,state,district,subdistrict,city FROM announcements
+        WHERE audience IN ('all',$1) AND (state IS NULL OR (state=ANY($2::text[]) AND (district IS NULL OR cardinality($3::text[])=0 OR district=ANY($3::text[]))))
+        ORDER BY created_at DESC LIMIT 20`,[user.role,serviceStates,serviceDistricts])).rows;
+    }
+    res.json({ complaints: complaints.rows, stats, contractors, notices, categories, geoSummary });
   } catch (e) { err(res, e); }
 });
 
@@ -228,7 +342,10 @@ app.patch('/api/contractors/:id/approval',auth('admin'),async(req,res)=>{
 
 app.post('/api/announcements',auth('admin'),async(req,res)=>{
   try{
-    const {rows}=await pool.query(`INSERT INTO announcements (title,body,severity,audience,author_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,[clean(req.body.title,140),clean(req.body.body,1000),['info','warning','urgent'].includes(req.body.severity)?req.body.severity:'info',['all','citizen','contractor'].includes(req.body.audience)?req.body.audience:'all',req.user.id]);
+    const title=clean(req.body.title,140),body=clean(req.body.body,1000),state=clean(req.body.state,100),district=clean(req.body.district,100),subdistrict=clean(req.body.subdistrict,140),city=clean(req.body.city,140);
+    if(!title||!body||!state||!district||!subdistrict||!city)return res.status(400).json({error:'Add the notice text and complete its state, district, taluka, and city.'});
+    const {rows}=await pool.query(`INSERT INTO announcements (title,body,severity,audience,author_id,state,district,subdistrict,city)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[title,body,['info','warning','urgent'].includes(req.body.severity)?req.body.severity:'info',['all','citizen','contractor'].includes(req.body.audience)?req.body.audience:'all',req.user.id,state,district,subdistrict,city]);
     io.emit('announcement:new',rows[0]);res.status(201).json({announcement:rows[0]});
   }catch(e){err(res,e);}
 });

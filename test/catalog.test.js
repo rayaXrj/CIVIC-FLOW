@@ -31,3 +31,29 @@ test('progress status update uses consistent PostgreSQL parameter types',()=>{
   const server=fs.readFileSync(path.join(__dirname,'..','server.js'),'utf8');
   assert.ok(server.includes('status=$1::varchar,updated_at=NOW(),resolved_at=CASE WHEN $3::boolean'));
 });
+test('dashboard report panel supports ranked state drill-down and an animated district return path',()=>{
+  const app=fs.readFileSync(path.join(__dirname,'..','public','app.js'),'utf8');
+  const css=fs.readFileSync(path.join(__dirname,'..','public','styles.css'),'utf8');
+  const server=fs.readFileSync(path.join(__dirname,'..','server.js'),'utf8');
+  for(const token of ['Reports by state','Reports by district','data-geo-state','data-geo-back'])assert.ok(app.includes(token),`missing ${token}`);
+  assert.ok(server.includes('AS count FROM complaints GROUP BY state,district'));
+  assert.ok(app.includes('state.data?.geoSummary?.length'));
+  assert.ok(css.includes('@keyframes geoCardReveal'));
+  assert.ok(css.includes('prefers-reduced-motion:reduce'));
+});
+test('city notices store an India location and filter for the citizen home area',()=>{
+  const db=fs.readFileSync(path.join(__dirname,'..','db.js'),'utf8');
+  const server=fs.readFileSync(path.join(__dirname,'..','server.js'),'utf8');
+  const app=fs.readFileSync(path.join(__dirname,'..','public','app.js'),'utf8');
+  for(const field of ['state','district','subdistrict','city'])assert.ok(db.includes(`ADD COLUMN IF NOT EXISTS ${field}`),`missing notice field ${field}`);
+  assert.ok(server.includes('profile.homeState||'));
+  assert.ok(server.includes('homeState:clean(req.body.homeState'));
+  assert.ok(app.includes("locationFields('notice'"));
+  assert.ok(app.includes("locationFields('home'"));
+});
+test('public landing metrics come from live complaint status counts',()=>{
+  const server=fs.readFileSync(path.join(__dirname,'..','server.js'),'utf8');
+  const app=fs.readFileSync(path.join(__dirname,'..','public','app.js'),'utf8');
+  assert.ok(server.includes("app.get('/api/public/stats'"));
+  for(const key of ['total','solved','pending'])assert.ok(app.includes(`data-impact=\"${key}\"`),`missing public metric ${key}`);
+});
