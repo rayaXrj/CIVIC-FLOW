@@ -24,7 +24,6 @@ services:
       ADMIN_NAME: ${ADMIN_NAME:-City Operations Head}
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL on the server}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD on the server}
-      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-}
       DEMO_MODE: "false"
     ports:
       - "3000:3000"

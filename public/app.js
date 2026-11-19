@@ -1,7 +1,7 @@
 /* CivicFlow client — role aware, responsive, live-updating single page app. */
 const $ = (s,root=document)=>root.querySelector(s), $$=(s,root=document)=>[...root.querySelectorAll(s)];
 const app=$('#app'), modalRoot=$('#modal-root'), toastRoot=$('#toast-region');
-const state={token:localStorage.getItem('civicflow-token'),user:JSON.parse(localStorage.getItem('civicflow-user')||'null'),page:'overview',data:null,loc:{},catalogs:{},socket:null,search:'',statusFilter:'all',priorityFilter:'all',locationFilter:{state:'',district:'',subdistrict:''},geoView:{level:'states',selectedState:''},mapPickers:{},mapConfig:null};
+const state={token:localStorage.getItem('civicflow-token'),user:JSON.parse(localStorage.getItem('civicflow-user')||'null'),page:'overview',data:null,loc:{},catalogs:{},socket:null,search:'',statusFilter:'all',priorityFilter:'all',locationFilter:{state:'',district:'',subdistrict:''},geoView:{level:'states',selectedState:''},mapPickers:{}};
 const icon={overview:'▦',complaints:'▤',contractors:'♙',announcements:'◉',account:'◎'};
 const pretty=s=>String(s||'').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -40,7 +40,7 @@ function locationFields(prefix,{city=true,address=true,map=true,required=true}={
     ${selectField('Taluka / Tehsil / Sub-district',`${prefix}-subdistrict`,[],'Select district first',required)}
     ${city?`<div class="field"><label for="${prefix}-city">City / Town / Local body${required?' *':''}</label><input id="${prefix}-city" name="${prefix}-city" list="${prefix}-city-list" placeholder="Type or choose a city / town" ${required?'required':''}><datalist id="${prefix}-city-list"></datalist><div class="hint">Search official urban local bodies or enter a settlement name.</div></div>`:''}
     ${address?`<div class="field span-two"><label for="${prefix}-address">Street / landmark / detailed address${required?' *':''}</label><input id="${prefix}-address" name="${prefix}-address" placeholder="Building, street, landmark, PIN code" ${required?'required':''}></div>`:''}
-    ${map?`<div class="field span-two"><label>Pin the exact issue location <span class="hint">(click or drag the marker)</span></label><div class="location-map-card"><div class="location-map-toolbar"><span><strong>Choose a map view</strong><small>Satellite imagery helps pinpoint the spot</small></span><div class="map-layer-switch"><button type="button" class="active" data-map-layer="satellite" data-map-prefix="${prefix}">Satellite</button><button type="button" data-map-layer="street" data-map-prefix="${prefix}">Street</button></div></div><div id="${prefix}-map" class="location-map" role="application" aria-label="Map for selecting the complaint location"></div><div class="map-selection-status" id="${prefix}-map-status" aria-live="polite">Select an area above, use your location, or tap the map to place a pin.</div></div><div class="map-row"><input type="number" step="any" name="${prefix}-lat" placeholder="Latitude" aria-label="Latitude"><input type="number" step="any" name="${prefix}-lng" placeholder="Longitude" aria-label="Longitude"><button class="btn btn-quiet btn-sm" type="button" data-geolocate="${prefix}">⌖ Use my location</button></div><div class="map-note" id="${prefix}-geo-note">GPS access requires permission. You can place the pin manually.</div></div>`:''}
+    ${map?`<div class="field span-two"><label>Pin the exact issue location <span class="hint">(click or drag the marker)</span></label><div class="location-map-card"><div class="location-map-toolbar"><span><strong>Choose the exact spot</strong><small>OpenStreetMap · click to place a pin, then drag to refine it</small></span></div><div id="${prefix}-map" class="location-map" role="application" aria-label="OpenStreetMap for selecting the complaint location"></div><div class="map-selection-status" id="${prefix}-map-status" aria-live="polite">Use the map, GPS, or coordinates to mark the issue location.</div></div><div class="map-row"><input type="number" step="any" name="${prefix}-lat" placeholder="Latitude" aria-label="Latitude"><input type="number" step="any" name="${prefix}-lng" placeholder="Longitude" aria-label="Longitude"><button class="btn btn-quiet btn-sm" type="button" data-geolocate="${prefix}">⌖ Use my location</button></div><div class="map-note" id="${prefix}-geo-note">GPS access requires permission. You can place the pin manually.</div></div>`:''}
   </div>`;
 }
 function wireLocation(root=document){
@@ -49,16 +49,15 @@ function wireLocation(root=document){
     const districtSel=$(`#${prefix}-district`,root),subSel=$(`#${prefix}-subdistrict`,root),city=$(`#${prefix}-city`,root);
     fillSelect(districtSel,locationMeta.districts.filter(d=>d.stateCode===stateItem?.code).map(d=>d.name),'Select district');fillSelect(subSel,[],'Select district first');
     if(city){city.value='';fillCityList(prefix,stateItem?.code,null);}
-    clearMapPin(prefix);centerMapToArea(prefix);
+    clearMapPin(prefix);
   });});
   $$('select[id$="-district"]',root).forEach(el=>{if(el.dataset.wired)return;el.dataset.wired='1';el.addEventListener('change',()=>{
     const prefix=el.id.slice(0,-9),districtName=el.value;
     const stateName=$(`#${prefix}-state`,root)?.value,st=locationMeta.states.find(x=>x.name===stateName),district=locationMeta.districts.find(x=>x.name===districtName&&x.stateCode===st?.code);
     fillSelect($(`#${prefix}-subdistrict`,root),locationMeta.subdistricts.filter(x=>x.districtCode===district?.code).map(x=>x.name),'Select taluka / tehsil');
     fillCityList(prefix,st?.code,district?.code);const city=$(`#${prefix}-city`,root);if(city)city.value='';
-    clearMapPin(prefix);centerMapToArea(prefix);
+    clearMapPin(prefix);
   });});
-  $$('input[id$="-city"]',root).forEach(el=>{if(el.dataset.mapWired)return;el.dataset.mapWired='1';el.addEventListener('blur',()=>centerMapToArea(el.id.slice(0,-5)));});
   $$('input[name$="-lat"],input[name$="-lng"]',root).forEach(el=>{if(el.dataset.mapWired)return;el.dataset.mapWired='1';el.addEventListener('change',()=>{
     const prefix=el.name.slice(0,-4),latText=$(`[name="${prefix}-lat"]`,root)?.value?.trim(),lngText=$(`[name="${prefix}-lng"]`,root)?.value?.trim();
     if(latText&&lngText){const lat=Number(latText),lng=Number(lngText);if(Number.isFinite(lat)&&Number.isFinite(lng))setMapPin(prefix,lat,lng,{zoom:16,status:'Coordinates entered manually.'});}
@@ -68,16 +67,9 @@ function wireLocation(root=document){
     const p=btn.dataset.geolocate,note=$(`#${p}-geo-note`,root);if(!navigator.geolocation){note.textContent='This browser does not provide location access.';return;}
     note.textContent='Requesting device location…';navigator.geolocation.getCurrentPosition(pos=>{setMapPin(p,pos.coords.latitude,pos.coords.longitude,{zoom:17,status:`Device position captured · accuracy about ${Math.round(pos.coords.accuracy)} m`});note.textContent=`Device location captured · accuracy about ${Math.round(pos.coords.accuracy)} m`;},()=>{note.textContent='Location permission was not available. Place the pin on the map or enter coordinates.'},{enableHighAccuracy:true,timeout:12000});
   });});
-  $$('[data-map-layer]',root).forEach(btn=>{if(btn.dataset.layerWired)return;btn.dataset.layerWired='1';btn.addEventListener('click',()=>setMapLayer(btn.dataset.mapPrefix,btn.dataset.mapLayer));});
 }
 function fillSelect(sel,values,placeholder){if(!sel)return;sel.innerHTML=`<option value="">${esc(placeholder)}</option>`+values.map(v=>`<option>${esc(v)}</option>`).join('');}
 function fillCityList(prefix,stateCode,districtCode){const list=$(`#${prefix}-city-list`);if(!list)return;const items=locationMeta.cities.filter(x=>x.stateCode===stateCode&&(!districtCode||!x.districtCode||x.districtCode===districtCode));list.innerHTML=items.map(c=>`<option value="${esc(c.name)}"></option>`).join('');}
-async function loadMapConfig(){
-  if(state.mapConfig)return state.mapConfig;
-  try{const response=await fetch('/api/map-config');state.mapConfig=response.ok?await response.json():{satelliteEnabled:false,mapTilerKey:''};}
-  catch{state.mapConfig={satelliteEnabled:false,mapTilerKey:''};}
-  return state.mapConfig;
-}
 function mapStatus(prefix,message){const el=$(`#${prefix}-map-status`);if(el)el.textContent=message;}
 function setMapPin(prefix,latitude,longitude,{zoom=16,status='Pin selected. Drag it to refine the location.'}={}){
   const lat=Number(latitude),lng=Number(longitude),picker=state.mapPickers[prefix];
@@ -97,54 +89,23 @@ function setMapPin(prefix,latitude,longitude,{zoom=16,status='Pin selected. Drag
 function clearMapPin(prefix){
   const latInput=$(`[name="${prefix}-lat"]`),lngInput=$(`[name="${prefix}-lng"]`);if(latInput)latInput.value='';if(lngInput)lngInput.value='';
   const picker=state.mapPickers[prefix];if(picker?.marker){picker.map.removeLayer(picker.marker);picker.marker=null;}
-  mapStatus(prefix,'Area changed. Choose the exact issue point on the map or use your device location.');
+  mapStatus(prefix,'Location fields changed. Select the exact issue point on the map or use your device location.');
 }
-function setMapLayer(prefix,name){
-  const picker=state.mapPickers[prefix];if(!picker)return;
-  const layer=name==='satellite'?picker.satelliteLayer:picker.streetLayer;
-  if(!layer){mapStatus(prefix,'Satellite imagery is not configured yet. Add a restricted MapTiler key to enable it.');return;}
-  for(const candidate of [picker.streetLayer,picker.satelliteLayer])if(candidate&&picker.map.hasLayer(candidate))picker.map.removeLayer(candidate);
-  layer.addTo(picker.map);picker.activeLayer=name;
-  $$(`[data-map-prefix="${prefix}"][data-map-layer]`).forEach(button=>{const active=button.dataset.mapLayer===name;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
-  if(name==='satellite')mapStatus(prefix,'Satellite imagery enabled. Click the map to place the issue pin.');
-  else mapStatus(prefix,'Street map enabled. Click the map to place the issue pin.');
-}
-async function initializeMapPicker(prefix){
+function initializeMapPicker(prefix){
   const element=$(`#${prefix}-map`);if(!element)return;if(!window.L){mapStatus(prefix,'Interactive map could not load. You can still enter coordinates manually.');return;}
-  const config=await loadMapConfig();if(!element.isConnected)return;
+  if(!element.isConnected)return;
   if(state.mapPickers[prefix]){state.mapPickers[prefix].map.remove();delete state.mapPickers[prefix];}
   const L=window.L,map=L.map(element,{scrollWheelZoom:false,zoomControl:true}).setView([22.9734,78.6569],4.6);
   const attribution='© OpenStreetMap contributors';
   const streetLayer=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution});
-  const satelliteLayer=config.mapTilerKey?L.tileLayer(`https://api.maptiler.com/maps/satellite-v4/{z}/{x}/{y}.jpg?key=${encodeURIComponent(config.mapTilerKey)}`,{tileSize:512,zoomOffset:-1,maxZoom:20,attribution:'© MapTiler © OpenStreetMap contributors'}):null;
-  state.mapPickers[prefix]={map,marker:null,streetLayer,satelliteLayer,config,activeLayer:null,geocodeSequence:0};
-  streetLayer.on('tileerror',()=>mapStatus(prefix,'Street map tiles could not load. Check this device’s internet connection.'));
-  satelliteLayer?.on('tileerror',()=>mapStatus(prefix,'Satellite tiles could not load. Check the MapTiler key and its allowed website origins.'));
+  state.mapPickers[prefix]={map,marker:null,streetLayer};
+  streetLayer.on('tileerror',()=>mapStatus(prefix,'OpenStreetMap tiles could not load. Check this device’s internet connection.'));
   map.on('click',event=>setMapPin(prefix,event.latlng.lat,event.latlng.lng,{status:'Issue location pinned. Drag the marker to refine it.'}));
-  if(satelliteLayer)setMapLayer(prefix,'satellite');else{
-    streetLayer.addTo(map);state.mapPickers[prefix].activeLayer='street';
-    $$(`[data-map-prefix="${prefix}"][data-map-layer]`).forEach(button=>{const active=button.dataset.mapLayer==='street';button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));if(button.dataset.mapLayer==='satellite'){button.disabled=true;button.title='Add MAPTILER_API_KEY to enable satellite imagery';}});
-    mapStatus(prefix,'Street map is ready. To enable satellite imagery, configure a free MapTiler key for this site.');
-  }
+  streetLayer.addTo(map);
+  mapStatus(prefix,'OpenStreetMap is ready. Click the map to place the issue pin.');
   setTimeout(()=>{if(element.isConnected)map.invalidateSize();},120);
   const latText=$(`[name="${prefix}-lat"]`)?.value?.trim(),lngText=$(`[name="${prefix}-lng"]`)?.value?.trim();
   if(latText!==''&&lngText!==''){const lat=Number(latText),lng=Number(lngText);if(Number.isFinite(lat)&&Number.isFinite(lng))setMapPin(prefix,lat,lng,{zoom:16,status:'Saved coordinates loaded. Drag the pin to refine it.'});}
-  else centerMapToArea(prefix);
-}
-async function centerMapToArea(prefix){
-  const picker=state.mapPickers[prefix];if(!picker||!picker.config.mapTilerKey)return;
-  const parts=['city','subdistrict','district','state'].map(key=>$(`#${prefix}-${key}`)?.value?.trim()).filter(Boolean);
-  if(!parts.length)return;
-  const sequence=++picker.geocodeSequence,query=[...parts,'India'].join(', ');
-  try{
-    const url=`https://api.maptiler.com/geocoding/${encodeURIComponent(query)}.json?key=${encodeURIComponent(picker.config.mapTilerKey)}&country=in&limit=1&language=en`;
-    const response=await fetch(url);if(!response.ok)throw new Error('Map search is temporarily unavailable.');
-    const result=await response.json();if(sequence!==picker.geocodeSequence||!picker.map.getContainer().isConnected)return;
-    const center=result.features?.[0]?.center;if(!center)return;
-    const zoom=parts.length>=3?14:parts.length===2?10:6;
-    picker.map.flyTo([center[1],center[0]],zoom,{duration:.8});
-    mapStatus(prefix,'Area centered on the map. Click to choose the exact issue point.');
-  }catch{if(sequence===picker.geocodeSequence)mapStatus(prefix,'Could not find that area on the map. You can still pan and pin the location manually.');}
 }
 function primeLocationFields(prefix,location,root=modalRoot){
   const stateName=location.state||'',stateEl=$(`#${prefix}-state`,root),districtEl=$(`#${prefix}-district`,root),subEl=$(`#${prefix}-subdistrict`,root),cityEl=$(`#${prefix}-city`,root);
@@ -368,7 +329,7 @@ function openComplaintForm(){
   $('#complaint-form',modalRoot).addEventListener('submit',async e=>{e.preventDefault();const b=e.currentTarget.querySelector('[type=submit]');b.disabled=true;b.textContent='Submitting…';const fd=new FormData(e.currentTarget);fd.set('state',fd.get('complaint-state'));fd.set('district',fd.get('complaint-district'));fd.set('subdistrict',fd.get('complaint-subdistrict'));fd.set('city',fd.get('complaint-city'));fd.set('address',fd.get('complaint-address'));fd.set('lat',fd.get('complaint-lat'));fd.set('lng',fd.get('complaint-lng'));try{const r=await api('/api/complaints',{method:'POST',body:fd});closeModal();toast(r.autoAssigned?'Complaint submitted and routed to a matching contractor.':'Complaint submitted. It is awaiting contractor coverage.');state.page='complaints';await loadWorkspace(true);}catch(x){toast(x.message,'error');b.disabled=false;b.textContent='Submit complaint →';}});
 }
 function wireModalClose(){ $$('[data-close]',modalRoot).forEach(b=>b.addEventListener('click',closeModal));$('.modal-backdrop',modalRoot)?.addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal();}); }
-function closeModal(){for(const picker of Object.values(state.mapPickers)){picker.map.remove();picker.geocodeSequence++;}state.mapPickers={};modalRoot.innerHTML='';}
+function closeModal(){for(const picker of Object.values(state.mapPickers))picker.map.remove();state.mapPickers={};modalRoot.innerHTML='';}
 async function findSimilarComplaints(id){
   const results=$('#similar-results',modalRoot),button=$('#find-similar',modalRoot),radius=$('#similar-radius',modalRoot)?.value||500;
   if(!results||!button)return;button.disabled=true;button.textContent='Checking…';results.innerHTML='<p class="hint">Checking recent reports in this category and area…</p>';

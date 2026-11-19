@@ -107,11 +107,6 @@ button.geo-row-clickable:hover{transform:translateX(4px) scale(1.006);border-col
 .location-map-toolbar strong,.location-map-toolbar small{display:block}
 .location-map-toolbar strong{font:800 11px Manrope;color:#203a45}
 .location-map-toolbar small{font-size:9px;color:#7e9098;margin-top:4px}
-.map-layer-switch{display:flex;gap:3px;padding:3px;border:1px solid #e3eae8;border-radius:10px;background:#fff}
-.map-layer-switch button{border:0;border-radius:7px;background:transparent;color:#6a7e86;font-size:10px;font-weight:750;padding:8px 11px;transition:background .2s,color .2s,box-shadow .2s}
-.map-layer-switch button:hover:not(:disabled){background:#edf3f1;color:#234d48}
-.map-layer-switch button.active{background:#1b4d4b;color:#fff;box-shadow:0 3px 9px #173b3730}
-.map-layer-switch button:disabled{cursor:not-allowed;opacity:.45}
 .location-map{height:340px;width:100%;background:linear-gradient(140deg,#e7eff1,#dbe8e8)}
 .map-selection-status{min-height:35px;padding:10px 13px;color:#5f777a;background:#fbfdfc;font-size:10px;line-height:1.45}
 .map-row{margin-top:8px}
@@ -123,5 +118,5 @@ button.geo-row-clickable:hover{transform:translateX(4px) scale(1.006);border-col
 .leaflet-container{font:11px 'DM Sans',sans-serif}
 .leaflet-control-attribution{font-size:8px!important}
 @keyframes mapPinDrop{0%{opacity:0;transform:rotate(-45deg) translate(0,-12px) scale(.7)}100%{opacity:1;transform:rotate(-45deg) translate(0,0) scale(1)}}
-@media(max-width:600px){.location-map{height:270px}.location-map-toolbar{align-items:flex-start;flex-direction:column}.map-layer-switch{align-self:stretch}.map-layer-switch button{flex:1}.map-row{flex-wrap:wrap}.map-row input{flex:1 1 38%}.map-row .btn{flex:1 1 100%}}
+@media(max-width:600px){.location-map{height:270px}.location-map-toolbar{align-items:flex-start;flex-direction:column}.map-row{flex-wrap:wrap}.map-row input{flex:1 1 38%}.map-row .btn{flex:1 1 100%}}
 @media(prefers-reduced-motion:reduce){.civic-map-pin span{animation:none!important}}
